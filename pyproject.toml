@@ -1,0 +1,46 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "agents4gov-tools"
+version = "0.1.0"
+description = "Installable library of modular Agents4Gov tools"
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+authors = [
+  { name = "LABIC - ICMC/USP" }
+]
+dependencies = [
+  "pydantic>=2.0",
+  "requests>=2.31"
+]
+
+[project.optional-dependencies]
+browser = [
+  "browser-use",
+  "playwright",
+  "langchain-openai"
+]
+openml = [
+  "openml",
+  "pandas",
+  "numpy",
+  "scikit-learn",
+  "sentence-transformers",
+  "joblib"
+]
+dev = [
+  "pytest",
+  "ruff"
+]
+
+[project.urls]
+Homepage = "https://github.com/agents4gov"
+
+[tool.setuptools]
+package-dir = { "" = "src" }
+
+[tool.setuptools.packages.find]
+where = ["src"]
