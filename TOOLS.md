@@ -1,19 +1,19 @@
 ## Available Tools
 
 ### Installable Package
-- **[src/agents4gov_tools/registry.py](src/agents4gov_tools/registry.py)** - Registry for discovering packaged tools after `pip install -e .`
+- **[src/agents4gov_apps/registry.py](src/agents4gov_apps/registry.py)** - Registry for discovering packaged tools after `pip install -e .`
 
 ### OpenAlex
-- **[src/agents4gov_tools/openalex/open_alex_doi.py](src/agents4gov_tools/openalex/open_alex_doi.py)** - Retrieves metadata and impact indicators for scientific publications using DOI
+- **[src/agents4gov_apps/openalex/open_alex_doi.py](src/agents4gov_apps/openalex/open_alex_doi.py)** - Retrieves metadata and impact indicators for scientific publications using DOI
 
 ### OpenML
-- **[src/agents4gov_tools/openml/openml_search.py](src/agents4gov_tools/openml/openml_search.py)** - Search for machine learning datasets using semantic similarity with embeddings
-- **[src/agents4gov_tools/openml/openml_download.py](src/agents4gov_tools/openml/openml_download.py)** - Download datasets from OpenML by ID and save as CSV
-- **[src/agents4gov_tools/openml/openml_knn_train.py](src/agents4gov_tools/openml/openml_knn_train.py)** - Train KNN models with hyperparameter tuning via cross-validation
+- **[src/agents4gov_apps/openml/openml_search.py](src/agents4gov_apps/openml/openml_search.py)** - Search for machine learning datasets using semantic similarity with embeddings
+- **[src/agents4gov_apps/openml/openml_download.py](src/agents4gov_apps/openml/openml_download.py)** - Download datasets from OpenML by ID and save as CSV
+- **[src/agents4gov_apps/openml/openml_knn_train.py](src/agents4gov_apps/openml/openml_knn_train.py)** - Train KNN models with hyperparameter tuning via cross-validation
 
 ### CNPq / Lattes
-- **[src/agents4gov_tools/cnpq_lattes_navigator_coi_tools/lattes_collector.py](src/agents4gov_tools/cnpq_lattes_navigator_coi_tools/lattes_collector.py)** - Collect Lattes profile data through browser-based navigation
-- **[src/agents4gov_tools/cnpq_lattes_navigator_coi_tools/lattes_coi_judge.py](src/agents4gov_tools/cnpq_lattes_navigator_coi_tools/lattes_coi_judge.py)** - Analyze conflicts of interest between a student and committee members
+- **[src/agents4gov_apps/cnpq_lattes_navigator_coi_tools/lattes_collector.py](src/agents4gov_apps/cnpq_lattes_navigator_coi_tools/lattes_collector.py)** - Collect Lattes profile data through browser-based navigation
+- **[src/agents4gov_apps/cnpq_lattes_navigator_coi_tools/lattes_coi_judge.py](src/agents4gov_apps/cnpq_lattes_navigator_coi_tools/lattes_coi_judge.py)** - Analyze conflicts of interest between a student and committee members
 
 ## How to Use Tools in Open WebUI
 

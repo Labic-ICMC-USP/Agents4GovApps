@@ -10,7 +10,7 @@ from .protocol import ToolSpecification
 AVAILABLE_TOOLS: dict[str, ToolSpecification] = {
     "cnpq_lattes_navigator_coi": ToolSpecification(
         key="cnpq_lattes_navigator_coi",
-        import_path="agents4gov_tools.cnpq_lattes_navigator_coi_tools.lattes_coi_judge",
+        import_path="agents4gov_apps.cnpq_lattes_navigator_coi_tools.lattes_coi_judge",
         title="COI Validator",
         description="Analisa conflito de interesse entre aluno e membros da banca.",
         legacy_paths=("cnpq-lattes-navigator-coi-tools/lattes_coi_judge.py",),
@@ -18,7 +18,7 @@ AVAILABLE_TOOLS: dict[str, ToolSpecification] = {
     ),
     "cnpq_lattes_collector": ToolSpecification(
         key="cnpq_lattes_collector",
-        import_path="agents4gov_tools.cnpq_lattes_navigator_coi_tools.lattes_collector",
+        import_path="agents4gov_apps.cnpq_lattes_navigator_coi_tools.lattes_collector",
         title="Lattes Collector",
         description="Coleta dados do Curriculo Lattes usando browser-use.",
         legacy_paths=("cnpq-lattes-navigator-coi-tools/lattes_collector.py",),
@@ -26,7 +26,7 @@ AVAILABLE_TOOLS: dict[str, ToolSpecification] = {
     ),
     "openalex_doi": ToolSpecification(
         key="openalex_doi",
-        import_path="agents4gov_tools.openalex.open_alex_doi",
+        import_path="agents4gov_apps.openalex.open_alex_doi",
         title="OpenAlex DOI Metadata",
         description="Recupera metadados e indicadores de impacto para uma publicacao via DOI.",
         legacy_paths=("openalex/open_alex_doi.py",),
@@ -34,7 +34,7 @@ AVAILABLE_TOOLS: dict[str, ToolSpecification] = {
     ),
     "openml_search": ToolSpecification(
         key="openml_search",
-        import_path="agents4gov_tools.openml.openml_search",
+        import_path="agents4gov_apps.openml.openml_search",
         title="OpenML Dataset Search",
         description="Busca datasets do OpenML por similaridade semantica.",
         legacy_paths=("openml/openml_search.py",),
@@ -42,7 +42,7 @@ AVAILABLE_TOOLS: dict[str, ToolSpecification] = {
     ),
     "openml_download": ToolSpecification(
         key="openml_download",
-        import_path="agents4gov_tools.openml.openml_download",
+        import_path="agents4gov_apps.openml.openml_download",
         title="OpenML Dataset Download",
         description="Baixa datasets do OpenML e salva como CSV.",
         legacy_paths=("openml/openml_download.py",),
@@ -50,7 +50,7 @@ AVAILABLE_TOOLS: dict[str, ToolSpecification] = {
     ),
     "openml_knn_train": ToolSpecification(
         key="openml_knn_train",
-        import_path="agents4gov_tools.openml.openml_knn_train",
+        import_path="agents4gov_apps.openml.openml_knn_train",
         title="OpenML KNN Trainer",
         description="Treina modelos KNN com validacao cruzada.",
         legacy_paths=("openml/openml_knn_train.py",),

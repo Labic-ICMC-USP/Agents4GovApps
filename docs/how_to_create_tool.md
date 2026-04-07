@@ -1,6 +1,6 @@
 # How to Create a Tool for Agents4Gov
 
-This is a legacy guide extracted from the earlier single-repo layout. The current packaging contract is documented in [tool_protocol.md](tool_protocol.md), and the packaged OpenAlex reference lives at `src/agents4gov_tools/openalex/open_alex_doi.py`.
+This is a legacy guide extracted from the earlier single-repo layout. The current packaging contract is documented in [tool_protocol.md](tool_protocol.md), and the packaged OpenAlex reference lives at `src/agents4gov_apps/openalex/open_alex_doi.py`.
 
 ## Table of Contents
 1. [Tool Structure Overview](#tool-structure-overview)

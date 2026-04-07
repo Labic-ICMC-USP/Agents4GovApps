@@ -16,4 +16,4 @@ This repository now ships as a Python package. Install it locally with:
 pip install -e .
 ```
 
-Packaged tools live under `src/agents4gov_tools/` and are registered in `src/agents4gov_tools/registry.py`.
+Packaged tools live under `src/agents4gov_apps/` and are registered in `src/agents4gov_apps/registry.py`.
