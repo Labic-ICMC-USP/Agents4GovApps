@@ -1,13 +1,18 @@
 import json
-import os
 
 import requests
-from pydantic import Field
+from pydantic import BaseModel, Field
 
 
 class Tools:
+    class Valves(BaseModel):
+        openalex_email: str = Field(
+            default="",
+            description="Email for OpenAlex polite pool (improves rate limits)",
+        )
+
     def __init__(self):
-        pass
+        self.valves = self.Valves()
 
     def _clean_doi(self, doi: str) -> str:
         """
@@ -51,10 +56,9 @@ class Tools:
 
         doi_clean = self._clean_doi(doi)
         base_url = f"https://api.openalex.org/works/doi:{doi_clean}"
-        email = os.getenv("OPENALEX_EMAIL", None)
         params = {}
-        if email:
-            params['mailto'] = email
+        if self.valves.openalex_email:
+            params['mailto'] = self.valves.openalex_email
 
         try:
             response = requests.get(base_url, params=params, timeout=10)

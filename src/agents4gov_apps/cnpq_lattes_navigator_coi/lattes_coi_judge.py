@@ -67,9 +67,9 @@ class Tools:
             return json.dumps(result, ensure_ascii=False, indent=2)
 
         except json.JSONDecodeError as e:
-            return json.dumps({"error": f"JSON invalido: {e}"})
+            return json.dumps({"status": "error", "error_type": "invalid_json", "message": f"JSON invalido: {e}"})
         except Exception as e:
-            return json.dumps({"error": str(e)})
+            return json.dumps({"status": "error", "error_type": "unexpected_error", "message": str(e)})
 
     async def validate_committee(self, student_json: str, members_json: str, __event_emitter__=None) -> str:
         """
@@ -108,9 +108,9 @@ class Tools:
             }, ensure_ascii=False, indent=2)
 
         except json.JSONDecodeError as e:
-            return json.dumps({"error": f"JSON invalido: {e}"})
+            return json.dumps({"status": "error", "error_type": "invalid_json", "message": f"JSON invalido: {e}"})
         except Exception as e:
-            return json.dumps({"error": str(e)})
+            return json.dumps({"status": "error", "error_type": "unexpected_error", "message": str(e)})
 
     def _norm(self, s: str) -> str:
         if not s:

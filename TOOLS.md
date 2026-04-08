@@ -12,8 +12,8 @@
 - **[src/agents4gov_apps/openml/openml_knn_train.py](src/agents4gov_apps/openml/openml_knn_train.py)** - Train KNN models with hyperparameter tuning via cross-validation
 
 ### CNPq / Lattes
-- **[src/agents4gov_apps/cnpq_lattes_navigator_coi_tools/lattes_collector.py](src/agents4gov_apps/cnpq_lattes_navigator_coi_tools/lattes_collector.py)** - Collect Lattes profile data through browser-based navigation
-- **[src/agents4gov_apps/cnpq_lattes_navigator_coi_tools/lattes_coi_judge.py](src/agents4gov_apps/cnpq_lattes_navigator_coi_tools/lattes_coi_judge.py)** - Analyze conflicts of interest between a student and committee members
+- **[src/agents4gov_apps/cnpq_lattes_navigator_coi/lattes_collector.py](src/agents4gov_apps/cnpq_lattes_navigator_coi/lattes_collector.py)** - Collect Lattes profile data through browser-based navigation
+- **[src/agents4gov_apps/cnpq_lattes_navigator_coi/lattes_coi_judge.py](src/agents4gov_apps/cnpq_lattes_navigator_coi/lattes_coi_judge.py)** - Analyze conflicts of interest between a student and committee members
 
 ## How to Use Tools in Open WebUI
 
@@ -27,13 +27,19 @@
 6. Save and enable the tool
 7. The tool will now be available for agents to use in conversations
 
-### Method 2: Direct File Import
+### Method 2: Package-backed thin wrapper
 
-If Open WebUI supports file-based tool loading:
+Install the package in the Open WebUI environment, then paste a thin wrapper that delegates to the registry:
 
-1. Ensure the `tools/` directory is in the Open WebUI tools path
-2. Restart Open WebUI to detect new tools
-3. Enable the tool in the Tools settings
+```python
+from agents4gov_apps import load_tool_class as _load
+_Impl = _load("openalex_doi")
+
+class Tools(_Impl):
+    pass
+```
+
+This keeps the implementation in version-controlled source and avoids copy-paste drift.
 
 ## Tool Requirements
 

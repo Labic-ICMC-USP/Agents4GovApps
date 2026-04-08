@@ -63,10 +63,10 @@ class Tools:
             JSON string com os dados extraidos ou um erro estruturado.
         """
         if not BROWSER_AVAILABLE:
-            return json.dumps({"error": "browser-use nao instalado"})
+            return json.dumps({"status": "error", "error_type": "missing_dependency", "message": "browser-use nao instalado"})
 
         if not self.valves.openrouter_api_key:
-            return json.dumps({"error": "Configure openrouter_api_key nas Valves"})
+            return json.dumps({"status": "error", "error_type": "missing_configuration", "message": "Configure openrouter_api_key nas Valves"})
 
         if __event_emitter__:
             await __event_emitter__({"type": "status", "data": {"description": f"Buscando {name}...", "done": False}})
@@ -81,7 +81,7 @@ class Tools:
         except Exception as e:
             if __event_emitter__:
                 await __event_emitter__({"type": "status", "data": {"description": f"Erro: {e}", "done": True}})
-            return json.dumps({"error": str(e)})
+            return json.dumps({"status": "error", "error_type": "unexpected_error", "message": str(e)})
 
     async def _extract(self, name: str, lattes_id: str, is_student: bool, emitter=None):
         task = f"""

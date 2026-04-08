@@ -10,7 +10,7 @@ from .protocol import ToolSpecification
 AVAILABLE_TOOLS: dict[str, ToolSpecification] = {
     "cnpq_lattes_navigator_coi": ToolSpecification(
         key="cnpq_lattes_navigator_coi",
-        import_path="agents4gov_apps.cnpq_lattes_navigator_coi_tools.lattes_coi_judge",
+        import_path="agents4gov_apps.cnpq_lattes_navigator_coi.lattes_coi_judge",
         title="COI Validator",
         description="Analisa conflito de interesse entre aluno e membros da banca.",
         legacy_paths=("cnpq-lattes-navigator-coi-tools/lattes_coi_judge.py",),
@@ -18,7 +18,7 @@ AVAILABLE_TOOLS: dict[str, ToolSpecification] = {
     ),
     "cnpq_lattes_collector": ToolSpecification(
         key="cnpq_lattes_collector",
-        import_path="agents4gov_apps.cnpq_lattes_navigator_coi_tools.lattes_collector",
+        import_path="agents4gov_apps.cnpq_lattes_navigator_coi.lattes_collector",
         title="Lattes Collector",
         description="Coleta dados do Curriculo Lattes usando browser-use.",
         legacy_paths=("cnpq-lattes-navigator-coi-tools/lattes_collector.py",),
@@ -30,7 +30,6 @@ AVAILABLE_TOOLS: dict[str, ToolSpecification] = {
         title="OpenAlex DOI Metadata",
         description="Recupera metadados e indicadores de impacto para uma publicacao via DOI.",
         legacy_paths=("openalex/open_alex_doi.py",),
-        optional_dependencies=("requests",),
     ),
     "openml_search": ToolSpecification(
         key="openml_search",
