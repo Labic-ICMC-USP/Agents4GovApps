@@ -7,7 +7,7 @@ This guide covers the library architecture, current best-practice adherence, gap
 ## Table of Contents
 
 1. [Architecture Overview](#1-architecture-overview)
-2. [Best Practices Audit](#2-best-practices-audit)
+2. [Best Practices Reference](#2-best-practices-reference)
 3. [The Standard Tool Interface](#3-the-standard-tool-interface)
 4. [Creating a New Tool](#4-creating-a-new-tool)
 5. [Using Tools in Open WebUI](#5-using-tools-in-open-webui)
@@ -15,7 +15,6 @@ This guide covers the library architecture, current best-practice adherence, gap
 7. [Using Tools with LangChain](#7-using-tools-with-langchain)
 8. [Using Tools with OpenAI Function Calling](#8-using-tools-with-openai-function-calling)
 9. [Adapting to Other Agent Frameworks](#9-adapting-to-other-agent-frameworks)
-10. [Known Gaps and Recommendations](#10-known-gaps-and-recommendations)
 
 ---
 
@@ -47,29 +46,32 @@ The design goal is **platform agnosticism**: the library is a pure Python packag
 
 ---
 
-## 2. Best Practices Audit
+## 2. Best Practices Reference
 
-### What is being done well
+The following conventions are enforced across all tools in this library. New tools must comply with all of them.
 
-- **Registry-based discovery.** `AVAILABLE_TOOLS` provides a single source of truth for all tools without filesystem scanning.
-- **Stable registry keys.** String keys like `"openalex_doi"` decouple callers from module paths.
-- **Legacy path tracking.** `legacy_paths` in `ToolSpecification` allows migration without breaking dependent automation scripts.
-- **JSON-only returns.** Every tool method returns a JSON string, never a raw Python object, making results safe for any LLM context window.
-- **Structured error envelope.** Most tools return `{"status": "error", "error_type": "...", "message": "..."}` instead of raising exceptions.
-- **Lazy optional imports.** Heavy dependencies (`sentence_transformers`, `openml`, `sklearn`) are imported inside methods, so the package can be imported even when optional extras are not installed.
-- **`Pydantic Field` descriptors on parameters.** Open WebUI and similar tools read these to auto-generate UI forms.
-- **`src/` layout.** Prevents accidental imports of the uninstalled package during development.
-- **Optional dependency groups in `pyproject.toml`.** Enables `pip install agents4gov-apps[openml]` partial installs.
-
-### Inconsistencies and gaps
-
-See [Section 10](#10-known-gaps-and-recommendations) for a detailed breakdown with recommended fixes.
+| Convention | Where enforced | Rationale |
+|------------|---------------|-----------|
+| Registry-based discovery via `AVAILABLE_TOOLS` | `registry.py` | Single source of truth; no filesystem scanning |
+| Stable string registry keys | `registry.py` | Decouples callers from module import paths |
+| `version` field on every `ToolSpecification` | `protocol.py` + `registry.py` | Allows programmatic version queries |
+| `BaseTool` optional ABC in `protocol.py` | `protocol.py` | Formalises the contract; enables static type checking |
+| One `Tools` class per module | every tool module | Registry and Open WebUI both expect exactly this |
+| All public methods return `str` (JSON) | every tool module | LLM tool calls require strings; avoids serialization surprises |
+| Error envelope `{"status": "error", "error_type": "...", "message": "..."}` | every tool module | Uniform error parsing for all callers |
+| No bare exceptions raised from public methods | every tool module | Caller cannot safely catch framework-internal exceptions |
+| `Valves` inner `BaseModel` on every tool | every tool module | Uniform configuration surface; Open WebUI renders it as a settings form |
+| All external config in `Valves`, not `os.getenv` | every tool module | Testable, injectable, UI-configurable |
+| Lazy imports of heavy optional dependencies | every tool module | Package stays importable without optional extras |
+| `Pydantic Field` descriptors on all parameters | every tool module | Open WebUI reads these to auto-generate input forms |
+| `src/` package layout | `pyproject.toml` | Prevents accidental imports of the uninstalled package |
+| Optional dependency groups in `pyproject.toml` | `pyproject.toml` | Enables `pip install agents4gov-apps[openml]` partial installs |
 
 ---
 
 ## 3. The Standard Tool Interface
 
-Every tool module must satisfy the following implicit contract. There is currently no enforced ABC; think of this as the behavioral specification.
+Every tool module must satisfy the contract below. Subclassing `BaseTool` is optional but recommended for static type checking — Open WebUI only cares that a class named `Tools` exists.
 
 ```python
 # src/agents4gov_apps/<group>/<tool>.py
@@ -84,10 +86,11 @@ licence: MIT
 """
 
 import json
+from agents4gov_apps import BaseTool
 from pydantic import BaseModel, Field
 
 
-class Tools:
+class Tools(BaseTool):  # BaseTool is optional but documents the contract
     # --- Optional: runtime configuration ---
     class Valves(BaseModel):
         """Variables set by the administrator in Open WebUI or by the caller."""
@@ -571,96 +574,3 @@ For any new framework, the pattern is always:
 3. Wrap the method in the framework's tool abstraction.
 4. Pass JSON strings returned by the method back to the LLM.
 
----
-
-## 10. Known Gaps and Recommendations
-
-### Gap 1 — No enforced abstract base class
-
-**Current state:** The `Tools` convention is implicit. Any class named `Tools` is accepted.
-
-**Recommendation:** Add a lightweight ABC in `protocol.py` that future tools can optionally subclass. This enables type checking and documents the contract formally without breaking existing tools.
-
-```python
-# protocol.py addition (optional, non-breaking)
-from abc import ABC
-
-class BaseTool(ABC):
-    """Optional base class documenting the agents4gov tool contract."""
-
-    def __init__(self): ...
-
-    # Subclasses define public methods that return str (JSON)
-```
-
-### Gap 2 — Inconsistent error envelope
-
-**Current state:** `lattes_coi_judge.py` returns `{"error": "..."}` while all other tools return `{"status": "error", "error_type": "...", "message": "..."}`.
-
-**Recommendation:** Align `lattes_coi_judge.py` to the standard envelope so callers can write a single error-check:
-
-```python
-# Standard
-if result["status"] == "error":
-    handle(result["error_type"], result["message"])
-```
-
-### Gap 3 — `load_tool_instance` not exported from `__init__.py`
-
-**Current state:** Only `load_tool_class` is in `__all__`; `load_tool_instance` is defined in `registry.py` but not exported publicly.
-
-**Recommendation:** Add `load_tool_instance` to `__init__.py`:
-
-```python
-from .registry import AVAILABLE_TOOLS, get_tool_spec, iter_tool_specs, load_tool_class, load_tool_instance
-
-__all__ = [
-    "AVAILABLE_TOOLS",
-    "get_tool_spec",
-    "iter_tool_specs",
-    "load_tool_class",
-    "load_tool_instance",   # add this
-]
-```
-
-### Gap 4 — No tests
-
-**Current state:** `pytest` is in dev deps but `tests/` does not exist.
-
-**Recommendation:** At minimum, add smoke tests per tool that assert:
-- The registry key resolves to a class.
-- The class can be instantiated.
-- A valid call returns `{"status": "success", ...}`.
-- An invalid call returns `{"status": "error", ...}` (not a raised exception).
-
-### Gap 5 — `requests` listed as optional dependency in registry
-
-**Current state:** `openalex_doi` lists `requests` in `optional_dependencies` inside the registry, but `requests` is already a core dependency in `pyproject.toml`.
-
-**Recommendation:** Remove `requests` from `openalex_doi`'s `optional_dependencies` in the registry to avoid confusion.
-
-### Gap 6 — Missing version field in `ToolSpecification`
-
-**Current state:** `ToolSpecification` has no `version` field; version lives only in module docstrings.
-
-**Recommendation:** Add `version: str = "1.0.0"` to `ToolSpecification` so the registry can answer "what version of tool X is installed?" programmatically.
-
-### Gap 7 — No `Valves` on synchronous tools
-
-**Current state:** `Valves` is only present on async browser tools. Sync tools hardcode `os.getenv(...)` calls scattered in methods.
-
-**Recommendation:** Give every tool a `Valves` class (even if empty) so the pattern is uniform and Open WebUI always has a configuration surface. Move `os.getenv` calls into `Valves` fields with sensible defaults.
-
-```python
-class Valves(BaseModel):
-    openalex_email: str = Field(default="", description="Polite pool email for OpenAlex API")
-
-def __init__(self):
-    self.valves = self.Valves()
-```
-
-### Gap 8 — `TOOLS.md` references outdated "Direct File Import" method
-
-**Current state:** `TOOLS.md` describes an outdated second method based on a legacy `tools/` directory that no longer exists.
-
-**Recommendation:** Replace with the two correct methods: paste standalone file vs. thin wrapper over installed package (as described in Section 5 of this guide).

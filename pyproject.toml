@@ -1,27 +1,51 @@
 [build-system]
-requires = ["setuptools>=68", "wheel"]
-build-backend = "setuptools.build_meta"
+requires = ["hatchling"]
+build-backend = "hatchling.build"
 
 [project]
 name = "agents4gov-apps"
 version = "0.1.0"
-description = "Installable library of modular Agents4Gov tools"
+description = "Modular Python tool library for AI agents in Brazilian government applications"
 readme = "README.md"
 requires-python = ">=3.11"
 license = { text = "MIT" }
 authors = [
   { name = "LABIC - ICMC/USP" }
 ]
+keywords = [
+  "agents",
+  "llm",
+  "tools",
+  "open-webui",
+  "langchain",
+  "government",
+  "brazil",
+  "cnpq",
+  "lattes",
+  "openml",
+  "openalex",
+]
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Intended Audience :: Developers",
+  "Intended Audience :: Science/Research",
+  "License :: OSI Approved :: MIT License",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Topic :: Scientific/Engineering :: Artificial Intelligence",
+  "Topic :: Software Development :: Libraries :: Python Modules",
+]
 dependencies = [
   "pydantic>=2.0",
-  "requests>=2.31"
+  "requests>=2.31",
 ]
 
 [project.optional-dependencies]
 browser = [
   "browser-use",
   "playwright",
-  "langchain-openai"
+  "langchain-openai",
 ]
 openml = [
   "openml",
@@ -29,18 +53,23 @@ openml = [
   "numpy",
   "scikit-learn",
   "sentence-transformers",
-  "joblib"
+  "joblib",
 ]
 dev = [
   "pytest",
-  "ruff"
+  "ruff",
+  "build",
+  "hatchling",
 ]
 
 [project.urls]
-Homepage = "https://github.com/agents4gov"
+Homepage = "https://github.com/Labic-ICMC-USP/Agents4GovApps"
+Repository = "https://github.com/Labic-ICMC-USP/Agents4GovApps"
+Issues = "https://github.com/Labic-ICMC-USP/Agents4GovApps/issues"
 
-[tool.setuptools]
-package-dir = { "" = "src" }
+[tool.hatch.build.targets.wheel]
+packages = ["src/agents4gov_apps"]
 
-[tool.setuptools.packages.find]
-where = ["src"]
+[tool.ruff]
+src = ["src"]
+line-length = 100

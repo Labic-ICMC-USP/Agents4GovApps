@@ -2,12 +2,15 @@ import json
 from typing import Any, Dict, List
 
 import numpy as np
-from pydantic import Field
+from pydantic import BaseModel, Field
 
 
 class Tools:
-    def __init__(self):
+    class Valves(BaseModel):
         pass
+
+    def __init__(self):
+        self.valves = self.Valves()
 
     def _compute_cosine_similarity(self, query_vec: List[float], dataset_vecs: List[List[float]]) -> np.ndarray:
         """

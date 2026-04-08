@@ -1,12 +1,15 @@
 import json
 import os
 
-from pydantic import Field
+from pydantic import BaseModel, Field
 
 
 class Tools:
-    def __init__(self):
+    class Valves(BaseModel):
         pass
+
+    def __init__(self):
+        self.valves = self.Valves()
 
     def _format_bytes(self, bytes_size: int) -> str:
         """

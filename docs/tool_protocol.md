@@ -34,6 +34,6 @@ pip install -e .
 4. Register the module in `src/agents4gov_apps/registry.py`.
 5. Document the tool in the relevant README.
 
-## Notes on Legacy Docs
+## Adding a New Tool — Full Walkthrough
 
-The older single-file examples under `docs/how_to_create_tool.md` were extracted from a different repository layout. Keep them as reference material, but use this protocol as the current source of truth for new tools.
+See **[Developer Guide — Section 4](developer_guide.md#4-creating-a-new-tool)** for the complete step-by-step including tests and adapter patterns.

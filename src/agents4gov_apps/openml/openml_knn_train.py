@@ -3,12 +3,15 @@ import os
 from typing import List, Optional
 
 import numpy as np
-from pydantic import Field
+from pydantic import BaseModel, Field
 
 
 class Tools:
-    def __init__(self):
+    class Valves(BaseModel):
         pass
+
+    def __init__(self):
+        self.valves = self.Valves()
 
     def _determine_task_type(self, y) -> str:
         """
