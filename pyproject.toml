@@ -55,6 +55,12 @@ openml = [
   "sentence-transformers",
   "joblib",
 ]
+gnews = [
+  "gnews",
+  "pandas",
+  "pyarrow",
+  "python-dateutil",
+]
 dev = [
   "pytest",
   "ruff",

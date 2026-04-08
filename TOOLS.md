@@ -3,6 +3,10 @@
 ### Installable Package
 - **[src/agents4gov_apps/registry.py](src/agents4gov_apps/registry.py)** - Registry for discovering packaged tools after `pip install -e .`
 
+### GNews
+
+- **[src/agents4gov_apps/gnews_collector/gnews_collector.py](src/agents4gov_apps/gnews_collector/gnews_collector.py)** - Coleta noticias do Google News dividindo automaticamente o intervalo de datas em janelas trimestrais e salvando resultados em Parquet
+
 ### OpenAlex
 - **[src/agents4gov_apps/openalex/open_alex_doi.py](src/agents4gov_apps/openalex/open_alex_doi.py)** - Retrieves metadata and impact indicators for scientific publications using DOI
 
