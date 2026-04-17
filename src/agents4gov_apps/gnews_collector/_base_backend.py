@@ -19,6 +19,9 @@ class NewsBackend(ABC):
         publisher    : str | None
     """
 
+    needs_sleep: bool = True
+    name: str = "unknown"
+
     @abstractmethod
     def search(
         self,

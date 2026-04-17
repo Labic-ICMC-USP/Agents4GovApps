@@ -61,6 +61,7 @@ gnews = [
   "pyarrow",
   "python-dateutil",
   "openpyxl",
+  "python-dotenv",
 ]
 dev = [
   "pytest",

@@ -13,6 +13,8 @@ class GNewsBackend(NewsBackend):
     high-volume or long-running collections.
     """
 
+    name: str = "gnews"
+
     def search(
         self,
         query: str,

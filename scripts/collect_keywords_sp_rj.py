@@ -6,8 +6,9 @@ Palavras-chave: polícia, crime, prisão, violência, justiça,
 
 Estratégia:
   - Janelas mensais (1 mês por consulta) para maximizar cobertura.
-  - 7 keywords × 180 meses = 1.260 consultas no total.
-  - Tempo estimado: ~3 horas com sleep_seconds=8.
+  - 7 keywords × 192 meses = 1.344 consultas no total.
+  - Backend automático: SerpAPI se SERPAPI_KEY estiver definida no ambiente,
+    senão gnews (fallback gratuito, ~8 s/consulta ≈ 3 h).
 
 Checkpoint/retomada:
   - Parquets já existentes são pulados automaticamente.
@@ -15,15 +16,26 @@ Checkpoint/retomada:
 
 Uso:
     cd /home/samuel/personal/Agents4GovApps
+
+    # com SerpAPI (rápido):
+    SERPAPI_KEY=sua_chave python3 scripts/collect_keywords_sp_rj.py
+
+    # sem chave (gnews fallback):
     python3 scripts/collect_keywords_sp_rj.py
 """
 
 import asyncio
+import os
 import sys
 import time
 from datetime import datetime
 from pathlib import Path
 
+try:
+    from dotenv import load_dotenv
+    load_dotenv(Path(__file__).resolve().parent.parent / ".env")
+except ImportError:
+    pass 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
 from agents4gov_apps import load_tool_instance  # noqa: E402
@@ -45,9 +57,6 @@ END   = "2025-12"
 
 OUTPUT_DIR = "./gnews_output_keywords"
 XLS_PATH   = Path(OUTPUT_DIR) / "noticias_keywords_2010_2025.xlsx"
-
-# Pausa entre consultas (segundos). 8 s → ~1.260 × 8 s ≈ 2,8 h.
-SLEEP_SECONDS = 8.0
 
 EXPORT_COLUMNS = [
     "keyword",
@@ -91,11 +100,14 @@ async def collect_all(tool):
     total_queries = len(KEYWORDS) * total_windows
 
     print(f"[{_ts()}] Início da coleta")
-    print(f"  Keywords  : {len(KEYWORDS)}")
-    print(f"  Janelas   : {total_windows} (mensais, {START} → {END})")
-    print(f"  Total ops : {total_queries}")
-    print(f"  Sleep     : {SLEEP_SECONDS} s/consulta")
-    print(f"  Est. tempo: {total_queries * SLEEP_SECONDS / 3600:.1f} h")
+    print(
+        f"  Keywords  : {len(KEYWORDS)}")
+    print(
+        f"  Janelas   : {total_windows} (mensais, {START} → {END})")
+    print(
+        f"  Total ops : {total_queries}")
+    backend_name = tool._backend.name
+    print(f"  Backend   : {backend_name}")
     print()
 
     grand_total_rows = 0
@@ -144,7 +156,8 @@ async def collect_all(tool):
                 f"(total op {op}/{total_queries})"
             )
 
-            await asyncio.sleep(SLEEP_SECONDS)
+            if tool._backend.needs_sleep:
+                await asyncio.sleep(tool.valves.sleep_seconds)
 
         print(
             f"[{_ts()}] '{keyword}' concluído: "
@@ -226,7 +239,9 @@ def export_xls():
 
 def main():
     tool = load_tool_instance("gnews_collector")
-    tool.valves.sleep_seconds = SLEEP_SECONDS
+    serpapi_key = os.environ.get("SERPAPI_KEY", "")
+    if serpapi_key:
+        tool.valves.serpapi_key = serpapi_key
 
     t0 = time.time()
     asyncio.run(collect_all(tool))

@@ -44,8 +44,11 @@ class Tools:
             description="Maximo de resultados por consulta (limite gnews: 100, serpapi: paginado)",
         )
         sleep_seconds: float = Field(
-            default=1.0,
-            description="Pausa em segundos entre consultas para evitar bloqueio",
+            default=8.0,
+            description=(
+                "Pausa em segundos entre consultas (aplicada apenas no backend gnews). "
+                "Ignorada quando SerpAPI esta em uso. Recomendado: >= 8.0 para evitar throttling."
+            ),
         )
         output_dir: str = Field(
             default="./gnews_output",
@@ -124,7 +127,7 @@ class Tools:
             await __event_emitter__({"type": "status", "data": {
                 "description": (
                     f"Coleta geral: {len(windows)} janelas de {window_months} mes(es)"
-                    f" | query={query}"
+                    f" | query={query} | backend={self._backend.name}"
                 ),
                 "done": False,
             }})
@@ -160,7 +163,8 @@ class Tools:
                 else:
                     errors.append(save["error"])
 
-            await asyncio.sleep(self.valves.sleep_seconds)
+            if self._backend.needs_sleep:
+                await asyncio.sleep(self.valves.sleep_seconds)
 
         total_rows = sum(c["rows"] for c in collected)
 
@@ -173,6 +177,7 @@ class Tools:
         return json.dumps({
             "status": "success",
             "stage": "general",
+            "backend": self._backend.name,
             "query": query,
             "period": {"start": start_year_month, "end": end_year_month},
             "window_months": window_months,
@@ -295,7 +300,8 @@ class Tools:
                     else:
                         errors.append(save["error"])
 
-                await asyncio.sleep(self.valves.sleep_seconds)
+                if self._backend.needs_sleep:
+                    await asyncio.sleep(self.valves.sleep_seconds)
 
             domain_summary[domain] = domain_rows
 
@@ -310,6 +316,7 @@ class Tools:
         return json.dumps({
             "status": "success",
             "stage": "source_filtered",
+            "backend": self._backend.name,
             "query": query,
             "period": {"start": start_year_month, "end": end_year_month},
             "domains_searched": len(source_domains),
@@ -363,7 +370,7 @@ class Tools:
 
         df = pd.DataFrame(articles)
         df["published_date_parsed"] = pd.to_datetime(
-            df["published_raw"], errors="coerce", utc=True
+            df["published_raw"], errors="coerce", utc=True, format="mixed"
         )
         return df
 
