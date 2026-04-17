@@ -487,8 +487,12 @@ class Tools:
                             print(
                                 f"  [RATE LIMIT] {backend.name} esgotado apos "
                                 f"{self.valves.max_retries} tentativa(s). "
-                                "Tentando proximo backend..."
+                                "Removendo da cadeia e tentando proximo backend..."
                             )
+                            self.valves.backend_priority = [
+                                b for b in self.valves.backend_priority
+                                if b != backend.name
+                            ]
                             break  # move to next backend in chain
                         else:
                             raise
@@ -498,7 +502,11 @@ class Tools:
                     # No retry -- go straight to the next backend.
                     print(f"  [ERROR] {backend.name}: {exc}")
                     if self.valves.auto_fallback:
-                        print(f"  [FALLBACK] Tentando proximo backend...")
+                        print(f"  [FALLBACK] Removendo '{backend.name}' da cadeia e tentando proximo...")
+                        self.valves.backend_priority = [
+                            b for b in self.valves.backend_priority
+                            if b != backend.name
+                        ]
                         break  # move to next backend in chain
                     else:
                         raise
