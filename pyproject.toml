@@ -60,6 +60,7 @@ gnews = [
   "pandas",
   "pyarrow",
   "python-dateutil",
+  "openpyxl",
 ]
 dev = [
   "pytest",

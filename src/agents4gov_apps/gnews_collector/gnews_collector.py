@@ -1,10 +1,10 @@
 """
 title: GNews Collector
 author: agents4gov
-description: Coleta noticias do Google News com janelas trimestrais automaticas para superar o limite de 100 resultados por consulta
+description: Coleta noticias do Google News via SerpAPI (preferencial) ou gnews (fallback gratuito), com janelas configuraveis
 required_open_webui_version: 0.4.0
-requirements: gnews, pandas, pyarrow, python-dateutil
-version: 1.0.0
+requirements: gnews, pandas, pyarrow, python-dateutil, requests
+version: 2.1.0
 licence: MIT
 """
 
@@ -17,9 +17,20 @@ from typing import List, Optional
 
 from pydantic import BaseModel, Field
 
+from ._base_backend import NewsBackend
+from ._gnews_backend import GNewsBackend
+from ._serpapi_backend import SerpAPIBackend
+
 
 class Tools:
     class Valves(BaseModel):
+        serpapi_key: str = Field(
+            default="",
+            description=(
+                "Chave da SerpAPI. Quando preenchida, usa Google News Light API "
+                "(rapido, sem throttling). Quando vazia, usa gnews como fallback gratuito."
+            ),
+        )
         language: str = Field(
             default="pt",
             description="Idioma das buscas (ISO 639-1, ex: pt, en, es)",
@@ -30,7 +41,7 @@ class Tools:
         )
         max_results: int = Field(
             default=100,
-            description="Maximo de resultados por consulta GNews (limite da API: 100)",
+            description="Maximo de resultados por consulta (limite gnews: 100, serpapi: paginado)",
         )
         sleep_seconds: float = Field(
             default=1.0,
@@ -43,10 +54,6 @@ class Tools:
 
     def __init__(self):
         self.valves = self.Valves()
-
-    # ------------------------------------------------------------------ #
-    # Public tool methods                                                  #
-    # ------------------------------------------------------------------ #
 
     async def collect_general_news(
         self,
@@ -69,27 +76,34 @@ class Tools:
             default="",
             description="Pasta de saida para os parquets. Usa Valves.output_dir se vazio.",
         ),
+        window_months: int = Field(
+            default=3,
+            description=(
+                "Tamanho de cada janela de busca em meses (padrao 3 = trimestral). "
+                "Use 1 para cobertura maxima em periodos longos."
+            ),
+        ),
         __event_emitter__=None,
     ) -> str:
         """
-        Coleta noticias gerais via GNews para uma query e periodo, sem filtro de fonte.
+        Coleta noticias gerais para uma query e periodo, sem filtro de fonte.
 
-        O periodo e automaticamente dividido em janelas de 3 meses para contornar
-        o limite de 100 resultados por consulta do GNews. Cada janela gera um
-        arquivo Parquet individual em output_dir/step1_general/.
+        O periodo e dividido em janelas de `window_months` meses para contornar
+        o limite de resultados por consulta. Cada janela gera um arquivo Parquet
+        individual em output_dir/step1_general/.
 
         Args:
-            query: Termo de busca GNews
+            query:            Termo de busca
             start_year_month: Inicio do periodo (YYYY-MM)
-            end_year_month: Fim do periodo (YYYY-MM)
-            output_dir: Pasta de saida (opcional, sobrescreve Valves.output_dir)
+            end_year_month:   Fim do periodo (YYYY-MM)
+            output_dir:       Pasta de saida (opcional, sobrescreve Valves.output_dir)
+            window_months:    Tamanho de cada janela em meses (padrao 3)
 
         Returns:
-            JSON com resumo da coleta: janelas processadas, arquivos salvos,
-            total de linhas e lista de erros.
+            JSON com resumo da coleta.
         """
         try:
-            import pandas  # noqa: F401  — validate dependency before starting
+            import pandas  # noqa: F401
         except ImportError:
             return self._error(
                 "missing_dependency",
@@ -99,7 +113,7 @@ class Tools:
         out_dir = Path(output_dir or self.valves.output_dir)
 
         try:
-            windows = self._build_quarter_windows(start_year_month, end_year_month)
+            windows = self._build_windows(start_year_month, end_year_month, window_months)
         except ValueError as e:
             return self._error("invalid_period", str(e))
 
@@ -108,7 +122,10 @@ class Tools:
 
         if __event_emitter__:
             await __event_emitter__({"type": "status", "data": {
-                "description": f"Coleta geral: {len(windows)} janelas trimestrais | query={query}",
+                "description": (
+                    f"Coleta geral: {len(windows)} janelas de {window_months} mes(es)"
+                    f" | query={query}"
+                ),
                 "done": False,
             }})
 
@@ -158,6 +175,7 @@ class Tools:
             "stage": "general",
             "query": query,
             "period": {"start": start_year_month, "end": end_year_month},
+            "window_months": window_months,
             "windows_total": len(windows),
             "files_saved": len(collected),
             "total_rows": total_rows,
@@ -194,22 +212,21 @@ class Tools:
         __event_emitter__=None,
     ) -> str:
         """
-        Coleta noticias filtradas por dominios/fontes especificos via GNews.
+        Coleta noticias filtradas por dominios/fontes especificos.
 
         Para cada dominio da lista, repete a busca em todas as janelas trimestrais
         do periodo. A query e automaticamente combinada com 'site:<domain>'.
         Cada combinacao dominio+janela gera um arquivo Parquet em output_dir/step2_sources/.
 
         Args:
-            query: Termo de busca base
+            query:          Termo de busca base
             start_year_month: Inicio do periodo (YYYY-MM)
-            end_year_month: Fim do periodo (YYYY-MM)
+            end_year_month:   Fim do periodo (YYYY-MM)
             source_domains: Lista de dominios a filtrar
-            output_dir: Pasta de saida (opcional, sobrescreve Valves.output_dir)
+            output_dir:     Pasta de saida (opcional, sobrescreve Valves.output_dir)
 
         Returns:
-            JSON com resumo por dominio: total de consultas, arquivos salvos,
-            artigos coletados por fonte e erros.
+            JSON com resumo por dominio.
         """
         try:
             import pandas  # noqa: F401
@@ -222,7 +239,7 @@ class Tools:
         out_dir = Path(output_dir or self.valves.output_dir)
 
         try:
-            windows = self._build_quarter_windows(start_year_month, end_year_month)
+            windows = self._build_windows(start_year_month, end_year_month)
         except ValueError as e:
             return self._error("invalid_period", str(e))
 
@@ -306,12 +323,54 @@ class Tools:
             "errors": errors or None,
         }, ensure_ascii=False, indent=2)
 
-    # ------------------------------------------------------------------ #
-    # Private helpers                                                      #
-    # ------------------------------------------------------------------ #
+    @property
+    def _backend(self) -> NewsBackend:
+        if self.valves.serpapi_key:
+            return SerpAPIBackend(self.valves.serpapi_key)
+        return GNewsBackend()
 
-    def _build_quarter_windows(self, start_ym: str, end_ym: str) -> list[tuple[date, date]]:
-        """Gera janelas trimestrais consecutivas entre start_ym e end_ym."""
+    def _search_window(
+        self,
+        query: str,
+        start_date_obj: date,
+        end_date_obj: date,
+        stage: str,
+        source_domain: Optional[str] = None,
+    ):
+        """Runs one search window and returns a metadata-enriched DataFrame."""
+        import pandas as pd
+
+        articles = self._backend.search(
+            query=query,
+            start_date=start_date_obj,
+            end_date=end_date_obj,
+            max_results=self.valves.max_results,
+            language=self.valves.language,
+            country=self.valves.country,
+        )
+
+        if not articles:
+            return pd.DataFrame()
+
+        now = datetime.utcnow().isoformat()
+        for a in articles:
+            a["stage"] = stage
+            a["query_used"] = query
+            a["source_domain"] = source_domain
+            a["window_start"] = start_date_obj.isoformat()
+            a["window_end"] = end_date_obj.isoformat()
+            a["collected_at"] = now
+
+        df = pd.DataFrame(articles)
+        df["published_date_parsed"] = pd.to_datetime(
+            df["published_raw"], errors="coerce", utc=True
+        )
+        return df
+
+    def _build_windows(
+        self, start_ym: str, end_ym: str, window_months: int = 3
+    ) -> list[tuple[date, date]]:
+        """Generates consecutive windows of *window_months* months."""
         from dateutil.relativedelta import relativedelta
 
         try:
@@ -326,11 +385,13 @@ class Tools:
         windows = []
         current = start
         while current <= global_end:
-            window_end = self._end_of_month(current + relativedelta(months=2))
+            window_end = self._end_of_month(
+                current + relativedelta(months=window_months - 1)
+            )
             if window_end > global_end:
                 window_end = global_end
             windows.append((current, window_end))
-            current = current + relativedelta(months=3)
+            current = current + relativedelta(months=window_months)
 
         return windows
 
@@ -340,105 +401,6 @@ class Tools:
     def _end_of_month(self, d: date) -> date:
         from dateutil.relativedelta import relativedelta
         return (d.replace(day=1) + relativedelta(months=1)) - timedelta(days=1)
-
-    def _search_window(
-        self,
-        query: str,
-        start_date_obj: date,
-        end_date_obj: date,
-        stage: str,
-        source_domain: Optional[str] = None,
-    ):
-        """Executa uma consulta GNews e retorna DataFrame normalizado.
-
-        Nunca lanca excecao: retorna DataFrame vazio em caso de erro.
-        """
-        try:
-            import pandas as pd
-            from gnews import GNews
-        except ImportError as e:
-            raise RuntimeError(
-                f"Dependencia ausente: {e}. "
-                "Execute: pip install agents4gov-apps[gnews]"
-            )
-
-        g = GNews(
-            language=self.valves.language,
-            country=self.valves.country,
-            max_results=self.valves.max_results,
-            start_date=(start_date_obj.year, start_date_obj.month, start_date_obj.day),
-            end_date=(end_date_obj.year, end_date_obj.month, end_date_obj.day),
-        )
-
-        try:
-            articles = g.get_news(query) or []
-        except Exception as e:
-            print(
-                f"[WARN] Consulta falhou: query={query!r} "
-                f"periodo={start_date_obj}/{end_date_obj} erro={e}"
-            )
-            return pd.DataFrame()
-
-        if not articles:
-            return pd.DataFrame()
-
-        rows = [
-            self._normalize_article(
-                article=a,
-                stage=stage,
-                query_used=query,
-                window_start=start_date_obj,
-                window_end=end_date_obj,
-                source_domain=source_domain,
-            )
-            for a in articles
-        ]
-
-        df = pd.DataFrame(rows)
-        df["published_date_parsed"] = pd.to_datetime(
-            df["published_raw"], errors="coerce", utc=True
-        )
-        return df
-
-    def _normalize_article(
-        self,
-        article: dict,
-        stage: str,
-        query_used: str,
-        window_start: date,
-        window_end: date,
-        source_domain: Optional[str] = None,
-    ) -> dict:
-        published_raw = (
-            article.get("published_date")
-            or article.get("published date")
-            or article.get("publishedDate")
-        )
-        return {
-            "stage": stage,
-            "query_used": query_used,
-            "source_domain": source_domain,
-            "window_start": window_start.isoformat(),
-            "window_end": window_end.isoformat(),
-            "title": article.get("title"),
-            "description": article.get("description"),
-            "url": article.get("url"),
-            "published_raw": published_raw,
-            "publisher": self._normalize_publisher(article.get("publisher")),
-            "collected_at": datetime.utcnow().isoformat(),
-        }
-
-    def _normalize_publisher(self, value) -> Optional[str]:
-        if value is None:
-            return None
-        if isinstance(value, str):
-            return value
-        if isinstance(value, dict):
-            for key in ("title", "name", "href"):
-                if key in value:
-                    return value[key]
-            return str(value)
-        return str(value)
 
     def _save_parquet(self, df, filepath: Path) -> dict:
         try:
@@ -451,7 +413,7 @@ class Tools:
     def _sanitize(self, text: str) -> str:
         text = text.strip().lower()
         text = re.sub(r"https?://", "", text)
-        text = re.sub(r'[^a-zA-Z0-9._-]+', "_", text)
+        text = re.sub(r"[^a-zA-Z0-9._-]+", "_", text)
         text = re.sub(r"_+", "_", text)
         return text.strip("_")
 
