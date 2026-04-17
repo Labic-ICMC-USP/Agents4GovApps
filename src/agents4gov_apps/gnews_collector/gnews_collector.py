@@ -1,25 +1,36 @@
 """
 title: GNews Collector
 author: agents4gov
-description: Coleta noticias do Google News via SerpAPI (preferencial) ou gnews (fallback gratuito), com janelas configuraveis
+description: Coleta noticias do Google News via cadeia configuravel de backends (SerpAPI, gnews) com retry e fallback automatico por rate limit
 required_open_webui_version: 0.4.0
 requirements: gnews, pandas, pyarrow, python-dateutil, requests
-version: 2.1.0
+version: 3.0.0
 licence: MIT
 """
 
 import asyncio
 import json
 import re
+import time
 from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import List, Optional
 
 from pydantic import BaseModel, Field
 
-from ._base_backend import NewsBackend
+from ._base_backend import NewsBackend, RateLimitError
 from ._gnews_backend import GNewsBackend
 from ._serpapi_backend import SerpAPIBackend
+
+# Registry maps backend name → factory function (receives self, returns instance or None).
+_BACKEND_REGISTRY: dict = {
+    "serpapi": lambda tool: (
+        SerpAPIBackend(tool.valves.serpapi_key) if tool.valves.serpapi_key else None
+    ),
+    "gnews": lambda tool: GNewsBackend(),
+}
+
+_RETRY_SLEEP_BASE = 2.0  # seconds; doubled on each retry attempt within a backend
 
 
 class Tools:
@@ -27,8 +38,30 @@ class Tools:
         serpapi_key: str = Field(
             default="",
             description=(
-                "Chave da SerpAPI. Quando preenchida, usa Google News Light API "
-                "(rapido, sem throttling). Quando vazia, usa gnews como fallback gratuito."
+                "Chave da SerpAPI. Necessaria quando 'serpapi' aparecer em backend_priority."
+            ),
+        )
+        backend_priority: List[str] = Field(
+            default=["serpapi", "gnews"],
+            description=(
+                "Ordem de preferencia dos backends. O primeiro disponivel e usado; "
+                "em caso de rate limit, tenta o proximo. "
+                "Valores validos: 'serpapi', 'gnews'."
+            ),
+        )
+        auto_fallback: bool = Field(
+            default=True,
+            description=(
+                "Quando True, troca automaticamente para o proximo backend ao atingir rate limit "
+                "(sem interacao). Quando False (padrao), propaga RateLimitError para o chamador "
+                "decidir (o script de coleta solicita confirmacao interativa)."
+            ),
+        )
+        max_retries: int = Field(
+            default=3,
+            description=(
+                "Numero de tentativas por backend antes de declarar rate limit "
+                "e passar para o proximo na cadeia."
             ),
         )
         language: str = Field(
@@ -46,8 +79,8 @@ class Tools:
         sleep_seconds: float = Field(
             default=8.0,
             description=(
-                "Pausa em segundos entre consultas (aplicada apenas no backend gnews). "
-                "Ignorada quando SerpAPI esta em uso. Recomendado: >= 8.0 para evitar throttling."
+                "Pausa em segundos entre consultas para backends que precisam de throttling "
+                "(ex: gnews). Ignorada quando o backend ativo nao requer sleep."
             ),
         )
         output_dir: str = Field(
@@ -57,6 +90,26 @@ class Tools:
 
     def __init__(self):
         self.valves = self.Valves()
+        # Tracks the backend instance that successfully handled the last _search_window call.
+        self._last_backend: Optional[NewsBackend] = None
+
+    def _resolve_backends(self) -> list:
+        """Return backend instances in priority order, skipping unconfigured ones."""
+        result = []
+        for name in self.valves.backend_priority:
+            factory = _BACKEND_REGISTRY.get(name)
+            if factory is None:
+                print(f"[WARN] Backend desconhecido ignorado: {name!r}")
+                continue
+            instance = factory(self)
+            if instance is not None:
+                result.append(instance)
+            else:
+                print(
+                    f"[INFO] Backend {name!r} ignorado: configuracao ausente "
+                    f"(ex: serpapi_key nao definida)."
+                )
+        return result
 
     async def collect_general_news(
         self,
@@ -120,6 +173,9 @@ class Tools:
         except ValueError as e:
             return self._error("invalid_period", str(e))
 
+        backends = self._resolve_backends()
+        active_backend_name = backends[0].name if backends else "none"
+
         collected: list[dict] = []
         errors: list[str] = []
 
@@ -127,7 +183,7 @@ class Tools:
             await __event_emitter__({"type": "status", "data": {
                 "description": (
                     f"Coleta geral: {len(windows)} janelas de {window_months} mes(es)"
-                    f" | query={query} | backend={self._backend.name}"
+                    f" | query={query} | backend={active_backend_name}"
                 ),
                 "done": False,
             }})
@@ -139,13 +195,29 @@ class Tools:
                     "done": False,
                 }})
 
-            df = self._search_window(
-                query=query,
-                start_date_obj=start_dt,
-                end_date_obj=end_dt,
-                stage="general",
-                source_domain=None,
-            )
+            try:
+                df = self._search_window(
+                    query=query,
+                    start_date_obj=start_dt,
+                    end_date_obj=end_dt,
+                    stage="general",
+                    source_domain=None,
+                )
+            except (RateLimitError, Exception) as exc:
+                err_type = "rate_limit" if isinstance(exc, RateLimitError) else "backend_error"
+                backend_name = exc.backend_name if isinstance(exc, RateLimitError) else "unknown"
+                errors.append(str(exc))
+                return self._error(
+                    err_type,
+                    str(exc),
+                    backend=backend_name,
+                    windows_completed=i,
+                    files_saved=len(collected),
+                    total_rows=sum(c["rows"] for c in collected),
+                )
+
+            if self._last_backend is not None:
+                active_backend_name = self._last_backend.name
 
             if not df.empty:
                 file_path = (
@@ -163,7 +235,7 @@ class Tools:
                 else:
                     errors.append(save["error"])
 
-            if self._backend.needs_sleep:
+            if self._last_backend is not None and self._last_backend.needs_sleep:
                 await asyncio.sleep(self.valves.sleep_seconds)
 
         total_rows = sum(c["rows"] for c in collected)
@@ -177,7 +249,7 @@ class Tools:
         return json.dumps({
             "status": "success",
             "stage": "general",
-            "backend": self._backend.name,
+            "backend": active_backend_name,
             "query": query,
             "period": {"start": start_year_month, "end": end_year_month},
             "window_months": window_months,
@@ -248,6 +320,9 @@ class Tools:
         except ValueError as e:
             return self._error("invalid_period", str(e))
 
+        backends = self._resolve_backends()
+        active_backend_name = backends[0].name if backends else "none"
+
         total_ops = len(source_domains) * len(windows)
         collected: list[dict] = []
         errors: list[str] = []
@@ -274,13 +349,29 @@ class Tools:
                     }})
 
                 domain_query = f"{query} site:{domain}"
-                df = self._search_window(
-                    query=domain_query,
-                    start_date_obj=start_dt,
-                    end_date_obj=end_dt,
-                    stage="source_filtered",
-                    source_domain=domain,
-                )
+                try:
+                    df = self._search_window(
+                        query=domain_query,
+                        start_date_obj=start_dt,
+                        end_date_obj=end_dt,
+                        stage="source_filtered",
+                        source_domain=domain,
+                    )
+                except (RateLimitError, Exception) as exc:
+                    err_type = "rate_limit" if isinstance(exc, RateLimitError) else "backend_error"
+                    backend_name = exc.backend_name if isinstance(exc, RateLimitError) else "unknown"
+                    errors.append(str(exc))
+                    return self._error(
+                        err_type,
+                        str(exc),
+                        backend=backend_name,
+                        operations_completed=op - 1,
+                        files_saved=len(collected),
+                        total_rows=sum(c["rows"] for c in collected),
+                    )
+
+                if self._last_backend is not None:
+                    active_backend_name = self._last_backend.name
 
                 if not df.empty:
                     file_path = (
@@ -300,7 +391,7 @@ class Tools:
                     else:
                         errors.append(save["error"])
 
-                if self._backend.needs_sleep:
+                if self._last_backend is not None and self._last_backend.needs_sleep:
                     await asyncio.sleep(self.valves.sleep_seconds)
 
             domain_summary[domain] = domain_rows
@@ -316,7 +407,7 @@ class Tools:
         return json.dumps({
             "status": "success",
             "stage": "source_filtered",
-            "backend": self._backend.name,
+            "backend": active_backend_name,
             "query": query,
             "period": {"start": start_year_month, "end": end_year_month},
             "domains_searched": len(source_domains),
@@ -330,12 +421,6 @@ class Tools:
             "errors": errors or None,
         }, ensure_ascii=False, indent=2)
 
-    @property
-    def _backend(self) -> NewsBackend:
-        if self.valves.serpapi_key:
-            return SerpAPIBackend(self.valves.serpapi_key)
-        return GNewsBackend()
-
     def _search_window(
         self,
         query: str,
@@ -344,35 +429,87 @@ class Tools:
         stage: str,
         source_domain: Optional[str] = None,
     ):
-        """Runs one search window and returns a metadata-enriched DataFrame."""
+        """Run one search window across the backend chain with retry and fallback.
+
+        Returns a metadata-enriched DataFrame.  Raises RateLimitError only when
+        auto_fallback=False and the last remaining backend hits its retry limit.
+        When auto_fallback=True, exhausted backends are skipped silently and an
+        empty DataFrame is returned if all backends are exhausted.
+        """
         import pandas as pd
 
-        articles = self._backend.search(
-            query=query,
-            start_date=start_date_obj,
-            end_date=end_date_obj,
-            max_results=self.valves.max_results,
-            language=self.valves.language,
-            country=self.valves.country,
-        )
-
-        if not articles:
+        backends = self._resolve_backends()
+        if not backends:
+            print("[WARN] Nenhum backend configurado. Retornando DataFrame vazio.")
             return pd.DataFrame()
 
-        now = datetime.utcnow().isoformat()
-        for a in articles:
-            a["stage"] = stage
-            a["query_used"] = query
-            a["source_domain"] = source_domain
-            a["window_start"] = start_date_obj.isoformat()
-            a["window_end"] = end_date_obj.isoformat()
-            a["collected_at"] = now
+        for backend in backends:
+            for attempt in range(1, self.valves.max_retries + 1):
+                try:
+                    articles = backend.search(
+                        query=query,
+                        start_date=start_date_obj,
+                        end_date=end_date_obj,
+                        max_results=self.valves.max_results,
+                        language=self.valves.language,
+                        country=self.valves.country,
+                    )
+                    # Success: tag articles and build DataFrame.
+                    self._last_backend = backend
+                    if not articles:
+                        return pd.DataFrame()
+                    now = datetime.utcnow().isoformat()
+                    for a in articles:
+                        a["stage"] = stage
+                        a["query_used"] = query
+                        a["source_domain"] = source_domain
+                        a["window_start"] = start_date_obj.isoformat()
+                        a["window_end"] = end_date_obj.isoformat()
+                        a["collected_at"] = now
+                        a["backend"] = backend.name
+                    df = pd.DataFrame(articles)
+                    df["published_date_parsed"] = pd.to_datetime(
+                        df["published_raw"], errors="coerce", utc=True, format="mixed"
+                    )
+                    return df
 
-        df = pd.DataFrame(articles)
-        df["published_date_parsed"] = pd.to_datetime(
-            df["published_raw"], errors="coerce", utc=True, format="mixed"
+                except RateLimitError as exc:
+                    is_last_attempt = (attempt == self.valves.max_retries)
+                    if not is_last_attempt:
+                        sleep_secs = _RETRY_SLEEP_BASE * (2 ** (attempt - 1))
+                        print(
+                            f"  [RATE LIMIT] {backend.name} tentativa {attempt}/{self.valves.max_retries}"
+                            f" — aguardando {sleep_secs:.0f}s antes de retentar..."
+                        )
+                        time.sleep(sleep_secs)
+                    else:
+                        if self.valves.auto_fallback:
+                            print(
+                                f"  [RATE LIMIT] {backend.name} esgotado apos "
+                                f"{self.valves.max_retries} tentativa(s). "
+                                "Tentando proximo backend..."
+                            )
+                            break  # move to next backend in chain
+                        else:
+                            raise
+
+                except Exception as exc:
+                    # Non-rate-limit error (invalid API key, network failure, etc.).
+                    # No retry -- go straight to the next backend.
+                    print(f"  [ERROR] {backend.name}: {exc}")
+                    if self.valves.auto_fallback:
+                        print(f"  [FALLBACK] Tentando proximo backend...")
+                        break  # move to next backend in chain
+                    else:
+                        raise
+
+        # All backends exhausted (only reachable when auto_fallback=True).
+        print(
+            f"  [RATE LIMIT] Todos os backends esgotados para "
+            f"query={query!r} periodo={start_date_obj}/{end_date_obj}. "
+            "Retornando DataFrame vazio."
         )
-        return df
+        return pd.DataFrame()
 
     def _build_windows(
         self, start_ym: str, end_ym: str, window_months: int = 3

@@ -3,7 +3,16 @@
 from datetime import date
 from typing import Optional
 
-from ._base_backend import NewsBackend
+from ._base_backend import NewsBackend, RateLimitError
+
+# Patterns in exception messages that indicate Google is throttling us.
+_THROTTLE_SIGNALS = (
+    "429",
+    "too many requests",
+    "rate limit",
+    "temporarily blocked",
+    "unusual traffic",
+)
 
 
 class GNewsBackend(NewsBackend):
@@ -11,6 +20,14 @@ class GNewsBackend(NewsBackend):
 
     Free to use -- no API key required.  May be throttled by Google on
     high-volume or long-running collections.
+
+    Raises:
+        RateLimitError: when explicit throttling signals are detected in an
+                        exception message (HTTP 429, "too many requests", etc.).
+
+    All other errors are logged and swallowed (returns []) because gnews is
+    unpredictable -- transient scraping failures look identical to real errors
+    and propagating them would trigger false-positive fallbacks.
     """
 
     name: str = "gnews"
@@ -43,6 +60,16 @@ class GNewsBackend(NewsBackend):
         try:
             raw = g.get_news(query) or []
         except Exception as exc:
+            exc_lower = str(exc).lower()
+            if any(sig in exc_lower for sig in _THROTTLE_SIGNALS):
+                raise RateLimitError(
+                    self.name,
+                    f"gnews detectou throttling do Google: {exc}. "
+                    f"query={query!r} periodo={start_date}/{end_date}",
+                ) from exc
+            # For all other errors (transient scraping failures, unexpected HTML,
+            # etc.) just warn and return empty -- gnews is unpredictable enough
+            # that propagating would cause too many false-positive fallbacks.
             print(
                 f"[WARN] gnews falhou: query={query!r} "
                 f"periodo={start_date}/{end_date} erro={exc}"

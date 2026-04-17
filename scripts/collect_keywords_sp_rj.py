@@ -10,6 +10,12 @@ Estratégia:
   - Backend automático: SerpAPI se SERPAPI_KEY estiver definida no ambiente,
     senão gnews (fallback gratuito, ~8 s/consulta ≈ 3 h).
 
+Fallback de backends:
+  - Por padrão, a ordem é ["serpapi", "gnews"].
+  - Quando um backend atinge rate limit e auto_fallback=False (padrão),
+    o script pergunta interativamente se deve trocar para o próximo.
+  - Para fallback silencioso: passe --auto-fallback ao executar.
+
 Checkpoint/retomada:
   - Parquets já existentes são pulados automaticamente.
   - Pode ser interrompido e retomado sem retrabalho.
@@ -22,6 +28,9 @@ Uso:
 
     # sem chave (gnews fallback):
     python3 scripts/collect_keywords_sp_rj.py
+
+    # fallback automático sem prompt:
+    python3 scripts/collect_keywords_sp_rj.py --auto-fallback
 """
 
 import asyncio
@@ -35,10 +44,10 @@ try:
     from dotenv import load_dotenv
     load_dotenv(Path(__file__).resolve().parent.parent / ".env")
 except ImportError:
-    pass 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
+    pass
 
-from agents4gov_apps import load_tool_instance  # noqa: E402
+from agents4gov_apps import load_tool_instance
+from agents4gov_apps.gnews_collector._base_backend import RateLimitError
 
 # ── Configuração ────────────────────────────────────────────────────────────
 
@@ -71,6 +80,7 @@ EXPORT_COLUMNS = [
     "query_used",
     "window_start",
     "window_end",
+    "backend",
 ]
 
 # ── Helpers ─────────────────────────────────────────────────────────────────
@@ -91,6 +101,52 @@ def _parquet_path(tool, keyword: str, start_dt, end_dt) -> Path:
     )
 
 
+def _active_backend_name(tool) -> str:
+    """Returns the name of the first configured backend in priority order."""
+    backends = tool._resolve_backends()
+    return backends[0].name if backends else "none"
+
+
+def _handle_backend_error(tool, exc: Exception) -> bool:
+    """Handle any backend error interactively.
+
+    For RateLimitError the exhausted backend is identified by name.
+    For other errors the current first backend in the priority list is assumed
+    to be the failing one.
+
+    Returns True if collection should continue (backend removed from chain),
+    False if the user chose to abort.
+    """
+    is_rate_limit = isinstance(exc, RateLimitError)
+    failed_name = exc.backend_name if is_rate_limit else tool.valves.backend_priority[0] if tool.valves.backend_priority else "unknown"
+    tag = "[RATE LIMIT]" if is_rate_limit else "[ERROR]"
+
+    print()
+    print(f"  {tag} Backend '{failed_name}': {exc}")
+    remaining = [b for b in tool.valves.backend_priority if b != failed_name]
+
+    if not remaining:
+        print("  Nenhum outro backend disponível. Abortando coleta.")
+        return False
+
+    print(f"  Backends restantes na cadeia: {remaining}")
+    try:
+        resp = input(f"  Trocar para '{remaining[0]}' e continuar? [Y/n] ").strip().lower()
+    except (EOFError, KeyboardInterrupt):
+        resp = "n"
+
+    if resp in ("", "y"):
+        tool.valves.backend_priority = remaining
+        print(
+            f"  Backend '{failed_name}' removido. "
+            f"Continuando com '{remaining[0]}'..."
+        )
+        print()
+        return True
+    else:
+        return False
+
+
 # ── Coleta ───────────────────────────────────────────────────────────────────
 
 
@@ -100,14 +156,11 @@ async def collect_all(tool):
     total_queries = len(KEYWORDS) * total_windows
 
     print(f"[{_ts()}] Início da coleta")
-    print(
-        f"  Keywords  : {len(KEYWORDS)}")
-    print(
-        f"  Janelas   : {total_windows} (mensais, {START} → {END})")
-    print(
-        f"  Total ops : {total_queries}")
-    backend_name = tool._backend.name
-    print(f"  Backend   : {backend_name}")
+    print(f"  Keywords  : {len(KEYWORDS)}")
+    print(f"  Janelas   : {total_windows} (mensais, {START} → {END})")
+    print(f"  Total ops : {total_queries}")
+    print(f"  Backend   : {_active_backend_name(tool)}")
+    print(f"  Auto-fallback: {tool.valves.auto_fallback}")
     print()
 
     grand_total_rows = 0
@@ -120,22 +173,35 @@ async def collect_all(tool):
 
         print(f"[{_ts()}] ── Keyword {ki}/{len(KEYWORDS)}: '{keyword}' ──────────────")
 
-        for wi, (start_dt, end_dt) in enumerate(windows, 1):
+        wi = 0
+        while wi < len(windows):
+            start_dt, end_dt = windows[wi]
             op += 1
             pq_path = _parquet_path(tool, keyword, start_dt, end_dt)
 
             if pq_path.exists():
                 kw_skipped += 1
                 grand_skipped += 1
+                wi += 1
                 continue
 
-            df = tool._search_window(
-                query=keyword,
-                start_date_obj=start_dt,
-                end_date_obj=end_dt,
-                stage="general",
-                source_domain=None,
-            )
+            try:
+                df = tool._search_window(
+                    query=keyword,
+                    start_date_obj=start_dt,
+                    end_date_obj=end_dt,
+                    stage="general",
+                    source_domain=None,
+                )
+            except Exception as exc:
+                should_continue = _handle_backend_error(tool, exc)
+                if not should_continue:
+                    print(f"\n[{_ts()}] Exportando resultados parciais antes de sair...")
+                    export_xls()
+                    sys.exit(1)
+                # Retry the same window with the updated backend chain (do not advance wi).
+                op -= 1  # will be re-incremented on the next iteration
+                continue
 
             rows_this = 0
             if not df.empty:
@@ -148,16 +214,20 @@ async def collect_all(tool):
                 else:
                     print(f"  [ERRO] {save['error']}")
 
+            active = tool._last_backend.name if tool._last_backend else "?"
             print(
                 f"  [{_ts()}] kw={ki}/{len(KEYWORDS)} "
-                f"janela={wi}/{total_windows} "
+                f"janela={wi + 1}/{total_windows} "
                 f"{start_dt}→{end_dt}  "
                 f"rows={rows_this}  "
-                f"(total op {op}/{total_queries})"
+                f"(total op {op}/{total_queries})  "
+                f"backend={active}"
             )
 
-            if tool._backend.needs_sleep:
+            if tool._last_backend is not None and tool._last_backend.needs_sleep:
                 await asyncio.sleep(tool.valves.sleep_seconds)
+
+            wi += 1
 
         print(
             f"[{_ts()}] '{keyword}' concluído: "
@@ -238,10 +308,12 @@ def export_xls():
 
 
 def main():
+
     tool = load_tool_instance("gnews_collector")
     serpapi_key = os.environ.get("SERPAPI_KEY", "")
     if serpapi_key:
         tool.valves.serpapi_key = serpapi_key
+
 
     t0 = time.time()
     asyncio.run(collect_all(tool))

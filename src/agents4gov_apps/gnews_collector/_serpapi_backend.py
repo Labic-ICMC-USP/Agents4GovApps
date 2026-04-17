@@ -2,10 +2,18 @@
 
 from datetime import date
 
-from ._base_backend import NewsBackend
+from ._base_backend import NewsBackend, RateLimitError
 
 _SERPAPI_ENDPOINT = "https://serpapi.com/search"
 _PAGE_SIZE = 10
+
+_RATE_LIMIT_HTTP_CODES = {429, 403}
+_RATE_LIMIT_MESSAGES = (
+    "your account has run out of searches",
+    "rate limit",
+    "quota",
+    "exceeded",
+)
 
 
 class SerpAPIBackend(NewsBackend):
@@ -13,6 +21,12 @@ class SerpAPIBackend(NewsBackend):
 
     Requires a valid SerpAPI key.  Handles pagination automatically up to
     *max_results* articles per call.
+
+    Raises:
+        RateLimitError: on HTTP 429/403 or quota-exceeded JSON error.
+        Exception:      on network failure, invalid API key, or any other
+                        non-rate-limit error -- so the orchestrator can fall
+                        back to the next backend instead of silently returning [].
     """
 
     needs_sleep: bool = False
@@ -51,14 +65,48 @@ class SerpAPIBackend(NewsBackend):
 
             try:
                 resp = _requests.get(_SERPAPI_ENDPOINT, params=params, timeout=30)
+            except Exception as exc:
+                raise Exception(
+                    f"serpapi erro de rede: query={query!r} "
+                    f"periodo={start_date}/{end_date} offset={offset} — {exc}"
+                ) from exc
+
+            if resp.status_code in _RATE_LIMIT_HTTP_CODES:
+                raise RateLimitError(
+                    self.name,
+                    f"SerpAPI retornou HTTP {resp.status_code} (rate limit / quota esgotada). "
+                    f"query={query!r} periodo={start_date}/{end_date}",
+                )
+
+            try:
                 resp.raise_for_status()
+            except Exception as exc:
+                raise Exception(
+                    f"serpapi HTTP {resp.status_code}: query={query!r} "
+                    f"periodo={start_date}/{end_date} offset={offset} — {exc}"
+                ) from exc
+
+            try:
                 data = resp.json()
             except Exception as exc:
-                print(
-                    f"[WARN] serpapi falhou: query={query!r} "
-                    f"periodo={start_date}/{end_date} offset={offset} erro={exc}"
+                raise Exception(
+                    f"serpapi resposta invalida (nao-JSON): query={query!r} "
+                    f"periodo={start_date}/{end_date} offset={offset} — {exc}"
+                ) from exc
+
+            error_msg = (data.get("error") or "").lower()
+            if error_msg:
+                if any(kw in error_msg for kw in _RATE_LIMIT_MESSAGES):
+                    raise RateLimitError(
+                        self.name,
+                        f"SerpAPI reportou limite: {data['error']!r}. "
+                        f"query={query!r} periodo={start_date}/{end_date}",
+                    )
+                # Any other API-level error (invalid key, bad params, etc.).
+                raise Exception(
+                    f"serpapi erro da API: {data['error']!r}. "
+                    f"query={query!r} periodo={start_date}/{end_date}"
                 )
-                break
 
             page = data.get("news_results") or []
             if not page:
