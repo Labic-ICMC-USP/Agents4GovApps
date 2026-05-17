@@ -52,6 +52,7 @@ except ImportError:
     pass
 
 from agents4gov_apps import load_tool_instance
+from agents4gov_apps.gnews_collector import console_emitter
 
 # ── Configuração ────────────────────────────────────────────────────────────
 
@@ -118,19 +119,6 @@ def load_queries() -> list[tuple[str, str]]:
 # ── Coleta via API pública ───────────────────────────────────────────────────
 
 
-def _make_window_emitter(qi: int, total_queries: int, query: str):
-    """Cria callback que loga progresso por janela. Compatível com __event_emitter__ da lib."""
-    async def emit(event):
-        if not isinstance(event, dict):
-            return
-        data = event.get("data") or {}
-        desc = data.get("description") or ""
-        if not desc:
-            return
-        log.info("  q=%d/%d :: %s", qi, total_queries, desc)
-    return emit
-
-
 async def collect_all(
     tool,
     queries: list[tuple[str, str]],
@@ -157,7 +145,7 @@ async def collect_all(
             end_year_month=end_ym,
             output_dir=OUTPUT_DIR,
             window_months=WINDOW_MONTHS,
-            __event_emitter__=_make_window_emitter(qi, len(queries), query),
+            __event_emitter__=console_emitter(log, prefix=f"  q={qi}/{len(queries)} :: "),
         )
         result = json.loads(result_json)
 

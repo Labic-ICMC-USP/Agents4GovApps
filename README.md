@@ -33,13 +33,16 @@ import json
 tool = load_tool_instance("openalex_doi")
 result = json.loads(tool.get_openalex_metadata_by_doi(doi="10.1038/s41586-021-03819-2"))
 
-# GNews (async)
-import asyncio
+# GNews (async, with per-window progress log)
+import asyncio, logging
+from agents4gov_apps.gnews_collector import console_emitter
+logging.basicConfig(level=logging.INFO)
 tool = load_tool_instance("gnews_collector")
 result = asyncio.run(tool.collect_general_news(
     query='"ICMC USP"',
     start_year_month="2023-01",
     end_year_month="2024-12",
+    __event_emitter__=console_emitter(),
 ))
 ```
 

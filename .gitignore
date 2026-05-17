@@ -70,3 +70,7 @@ Thumbs.db
 *.xlsx
 *.csv
 *.parquet
+
+# Pipeline logs
+collect.log
+*.log
