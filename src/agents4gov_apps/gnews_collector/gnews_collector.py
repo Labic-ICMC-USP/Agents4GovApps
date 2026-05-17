@@ -195,6 +195,20 @@ class Tools:
                     "done": False,
                 }})
 
+            file_path = (
+                out_dir / "step1_general"
+                / f"general__{self._sanitize(query)}"
+                  f"__{start_dt.isoformat()}__{end_dt.isoformat()}.parquet"
+            )
+            if file_path.exists():
+                collected.append({
+                    "window": f"{start_dt.isoformat()}/{end_dt.isoformat()}",
+                    "path": str(file_path),
+                    "rows": 0,
+                    "skipped": True,
+                })
+                continue
+
             try:
                 df = self._search_window(
                     query=query,
@@ -220,11 +234,6 @@ class Tools:
                 active_backend_name = self._last_backend.name
 
             if not df.empty:
-                file_path = (
-                    out_dir / "step1_general"
-                    / f"general__{self._sanitize(query)}"
-                      f"__{start_dt.isoformat()}__{end_dt.isoformat()}.parquet"
-                )
                 save = self._save_parquet(df, file_path)
                 if save["ok"]:
                     collected.append({
