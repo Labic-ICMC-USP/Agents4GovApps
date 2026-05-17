@@ -24,6 +24,14 @@ AVAILABLE_TOOLS: dict[str, ToolSpecification] = {
         version="1.0.0",
         optional_dependencies=("browser-use", "playwright", "langchain-openai"),
     ),
+    "gnews_collector": ToolSpecification(
+        key="gnews_collector",
+        import_path="agents4gov_apps.gnews_collector.gnews_collector",
+        title="GNews Collector",
+        description="Coleta noticias do Google News com janelas trimestrais automaticas para superar o limite de 100 resultados por consulta.",
+        version="1.0.0",
+        optional_dependencies=("gnews", "pandas", "pyarrow", "python-dateutil"),
+    ),
     "openalex_doi": ToolSpecification(
         key="openalex_doi",
         import_path="agents4gov_apps.openalex.open_alex_doi",

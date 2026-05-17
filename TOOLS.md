@@ -3,6 +3,13 @@
 ### Installable Package
 - **[src/agents4gov_apps/registry.py](src/agents4gov_apps/registry.py)** - Registry for discovering packaged tools after `pip install -e .`
 
+### GNews
+
+- **[src/agents4gov_apps/gnews_collector/gnews_collector.py](src/agents4gov_apps/gnews_collector/gnews_collector.py)** - Orchestrator: coleta noticias via janelas de datas configuráveis, salva em Parquet e exporta XLS. Suporta dois backends intercambiáveis:
+  - **[_gnews_backend.py](src/agents4gov_apps/gnews_collector/_gnews_backend.py)** - Backend gratuito via biblioteca `gnews` (scraping RSS). Sem chave de API; sujeito a throttling do Google.
+  - **[_serpapi_backend.py](src/agents4gov_apps/gnews_collector/_serpapi_backend.py)** - Backend via SerpAPI Google News Light. Rápido, paginado, sem throttling. Requer `serpapi_key` nas Valves.
+  - **[_base_backend.py](src/agents4gov_apps/gnews_collector/_base_backend.py)** - ABC `NewsBackend`: contrato para adição de novos backends (GDELT, NewsAPI, etc.).
+
 ### OpenAlex
 - **[src/agents4gov_apps/openalex/open_alex_doi.py](src/agents4gov_apps/openalex/open_alex_doi.py)** - Retrieves metadata and impact indicators for scientific publications using DOI
 
