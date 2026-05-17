@@ -22,13 +22,10 @@ from __future__ import annotations
 
 import argparse
 import logging
-import re
 import sys
-from datetime import timedelta
 from pathlib import Path
 
 import pandas as pd
-from dateutil.relativedelta import relativedelta
 
 logging.basicConfig(
     level=logging.INFO,
@@ -36,89 +33,6 @@ logging.basicConfig(
     datefmt="%H:%M:%S",
 )
 log = logging.getLogger("analyze_violencia_genero")
-
-
-# ── Parsing de datas relativas em PT-BR ──────────────────────────────────────
-#
-# SerpAPI devolve `published_raw` em forma relativa ("27 meses atrás", "ontem",
-# etc.). pandas não parseia esse formato, então `published_date_parsed` chega
-# como NaT em todas as linhas. Usamos `collected_at` como âncora para
-# reconstruir a data absoluta.
-
-_REL_PATTERN = re.compile(
-    r"(?i)^\s*(?:(?:h[aá]|faz)\s+)?(\d+)\s+(\w+?)\s+atr[aá]s\s*$"
-)
-
-
-def _unit_to_kwarg(unit: str) -> str | None:
-    """Normaliza unidade PT-BR (singular/plural, com acento) → kwarg de timedelta/relativedelta."""
-    u = unit.lower().strip()
-    # mês/mes/meses
-    if u in ("mês", "mes", "meses"):
-        return "months"
-    # ano/anos
-    if u in ("ano", "anos"):
-        return "years"
-    # remove plural simples
-    if u.endswith("s"):
-        u = u[:-1]
-    return {
-        "minuto": "minutes",
-        "hora": "hours",
-        "dia": "days",
-        "semana": "weeks",
-    }.get(u)
-
-
-def _parse_relative_pt(raw: str, anchor: pd.Timestamp) -> pd.Timestamp:
-    """Converte 'N <unidade> atrás' em data absoluta usando `anchor`."""
-    if not isinstance(raw, str) or pd.isna(anchor):
-        return pd.NaT
-
-    s = raw.strip().lower()
-    if s == "hoje":
-        return anchor
-    if s == "ontem":
-        return anchor - timedelta(days=1)
-
-    m = _REL_PATTERN.match(raw)
-    if not m:
-        return pd.NaT
-
-    n = int(m.group(1))
-    kwarg = _unit_to_kwarg(m.group(2))
-    if kwarg is None:
-        return pd.NaT
-
-    if kwarg in ("minutes", "hours", "days", "weeks"):
-        return anchor - timedelta(**{kwarg: n})
-    return anchor - relativedelta(**{kwarg: n})
-
-
-def reparse_dates(df: pd.DataFrame) -> pd.DataFrame:
-    """Preenche `published_date_parsed` para linhas com NaT usando `published_raw`
-    + `collected_at` como âncora. Último fallback: midpoint da janela."""
-    anchor = pd.to_datetime(df["collected_at"], utc=True, errors="coerce")
-    parsed = df["published_date_parsed"]
-    needs_fix = parsed.isna() & df["published_raw"].notna()
-
-    if needs_fix.any():
-        fixed = [
-            _parse_relative_pt(raw, anc) if pd.notna(anc) else pd.NaT
-            for raw, anc in zip(df.loc[needs_fix, "published_raw"], anchor.loc[needs_fix])
-        ]
-        parsed = parsed.copy()
-        parsed.loc[needs_fix] = pd.to_datetime(pd.Series(fixed, index=df.index[needs_fix]), utc=True)
-
-    still_nat = parsed.isna() & df.get("window_start", pd.Series([None] * len(df))).notna()
-    if still_nat.any():
-        midpoints = pd.to_datetime(df.loc[still_nat, "window_start"], utc=True, errors="coerce") + timedelta(days=15)
-        parsed = parsed.copy()
-        parsed.loc[still_nat] = midpoints
-
-    df = df.copy()
-    df["published_date_parsed"] = parsed
-    return df
 
 
 # ── Loading ─────────────────────────────────────────────────────────────────
@@ -158,15 +72,6 @@ def load_dataset(output_dir: Path, queries_xlsx: Path) -> pd.DataFrame:
     df["published_date_parsed"] = pd.to_datetime(
         df["published_date_parsed"], utc=True, errors="coerce"
     )
-    pre_fix_nat = df["published_date_parsed"].isna().sum()
-    if pre_fix_nat > 0:
-        df = reparse_dates(df)
-        post_fix_nat = df["published_date_parsed"].isna().sum()
-        log.info(
-            "Datas relativas reparseadas: %d → %d NaT (recuperadas %d via collected_at/window_start).",
-            pre_fix_nat, post_fix_nat, pre_fix_nat - post_fix_nat,
-        )
-
     valid_dates = df["published_date_parsed"].notna()
     if (~valid_dates).any():
         log.warning("%d linhas com data inválida descartadas das séries temporais.", (~valid_dates).sum())

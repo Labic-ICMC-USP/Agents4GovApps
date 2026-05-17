@@ -43,7 +43,6 @@ import os
 import re
 import sys
 import time
-from datetime import datetime, timedelta
 from pathlib import Path
 
 try:
@@ -119,6 +118,19 @@ def load_queries() -> list[tuple[str, str]]:
 # ── Coleta via API pública ───────────────────────────────────────────────────
 
 
+def _make_window_emitter(qi: int, total_queries: int, query: str):
+    """Cria callback que loga progresso por janela. Compatível com __event_emitter__ da lib."""
+    async def emit(event):
+        if not isinstance(event, dict):
+            return
+        data = event.get("data") or {}
+        desc = data.get("description") or ""
+        if not desc:
+            return
+        log.info("  q=%d/%d :: %s", qi, total_queries, desc)
+    return emit
+
+
 async def collect_all(
     tool,
     queries: list[tuple[str, str]],
@@ -145,6 +157,7 @@ async def collect_all(
             end_year_month=end_ym,
             output_dir=OUTPUT_DIR,
             window_months=WINDOW_MONTHS,
+            __event_emitter__=_make_window_emitter(qi, len(queries), query),
         )
         result = json.loads(result_json)
 
@@ -185,78 +198,6 @@ async def collect_all(
         "Coleta finalizada — %d arquivos novos, %d linhas, %d janelas puladas no total.",
         grand_files, grand_rows, grand_skipped,
     )
-
-
-# ── Parser de datas relativas em PT-BR (SerpAPI quirk) ───────────────────────
-#
-# SerpAPI devolve `published_raw` em forma relativa ("27 meses atrás"), que
-# a lib não converte automaticamente. Fazemos o fix no momento do export.
-
-_REL_PATTERN = re.compile(
-    r"(?i)^\s*(?:(?:h[aá]|faz)\s+)?(\d+)\s+(\w+?)\s+atr[aá]s\s*$"
-)
-
-
-def _unit_to_kwarg(unit: str):
-    u = unit.lower().strip()
-    if u in ("mês", "mes", "meses"):
-        return "months"
-    if u in ("ano", "anos"):
-        return "years"
-    if u.endswith("s"):
-        u = u[:-1]
-    return {"minuto": "minutes", "hora": "hours", "dia": "days", "semana": "weeks"}.get(u)
-
-
-def _parse_relative_pt(raw, anchor):
-    import pandas as pd
-    from dateutil.relativedelta import relativedelta
-
-    if not isinstance(raw, str) or pd.isna(anchor):
-        return pd.NaT
-    s = raw.strip().lower()
-    if s == "hoje":
-        return anchor
-    if s == "ontem":
-        return anchor - timedelta(days=1)
-    m = _REL_PATTERN.match(raw)
-    if not m:
-        return pd.NaT
-    n = int(m.group(1))
-    kwarg = _unit_to_kwarg(m.group(2))
-    if kwarg is None:
-        return pd.NaT
-    if kwarg in ("minutes", "hours", "days", "weeks"):
-        return anchor - timedelta(**{kwarg: n})
-    return anchor - relativedelta(**{kwarg: n})
-
-
-def _reparse_dates(df):
-    import pandas as pd
-
-    anchor = pd.to_datetime(df["collected_at"], utc=True, errors="coerce")
-    parsed = df["published_date_parsed"]
-    needs_fix = parsed.isna() & df["published_raw"].notna()
-    if needs_fix.any():
-        fixed = [
-            _parse_relative_pt(raw, anc)
-            for raw, anc in zip(df.loc[needs_fix, "published_raw"], anchor.loc[needs_fix])
-        ]
-        parsed = parsed.copy()
-        parsed.loc[needs_fix] = pd.to_datetime(
-            pd.Series(fixed, index=df.index[needs_fix]), utc=True
-        )
-    still_nat = parsed.isna() & df["window_start"].notna()
-    if still_nat.any():
-        midpoints = (
-            pd.to_datetime(df.loc[still_nat, "window_start"], utc=True, errors="coerce")
-            + timedelta(days=15)
-        )
-        parsed = parsed.copy()
-        parsed.loc[still_nat] = midpoints
-    df = df.copy()
-    df["published_date_parsed"] = parsed
-    return df
 
 
 # ── Export XLS (uma sheet por categoria) ─────────────────────────────────────
@@ -307,15 +248,6 @@ def export_xls_per_categoria(queries: list[tuple[str, str]]) -> None:
     query_to_categoria = {q: c for q, c in queries}
     merged["query"] = merged["query_used"]
     merged["categoria"] = merged["query_used"].map(query_to_categoria)
-
-    pre_fix_nat = merged["published_date_parsed"].isna().sum()
-    if pre_fix_nat > 0:
-        merged = _reparse_dates(merged)
-        post_fix_nat = merged["published_date_parsed"].isna().sum()
-        log.info(
-            "Datas relativas reparseadas: %d → %d NaT (recuperadas %d).",
-            pre_fix_nat, post_fix_nat, pre_fix_nat - post_fix_nat,
-        )
 
     before = len(merged)
     merged = merged.drop_duplicates(subset=["url"], keep="first")

@@ -19,6 +19,7 @@ from typing import List, Optional
 from pydantic import BaseModel, Field
 
 from ._base_backend import NewsBackend, RateLimitError
+from ._date_utils import parse_published_dates
 from ._gnews_backend import GNewsBackend
 from ._serpapi_backend import SerpAPIBackend
 
@@ -477,9 +478,7 @@ class Tools:
                         a["collected_at"] = now
                         a["backend"] = backend.name
                     df = pd.DataFrame(articles)
-                    df["published_date_parsed"] = pd.to_datetime(
-                        df["published_raw"], errors="coerce", utc=True, format="mixed"
-                    )
+                    parse_published_dates(df)
                     return df
 
                 except RateLimitError as exc:
